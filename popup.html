@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Compressor</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <h1>File Compressor</h1>
+        
+        <div class="upload-section">
+            <input type="file" id="file-input" />
+            
+            <div class="action-buttons">
+                <button id="compress-btn" class="primary-btn">Compress File</button>
+                <button id="decompress-btn" class="secondary-btn">Decompress File</button>
+            </div>
+            
+            <div id="error-msg" class="error-msg"></div>
+        </div>
+
+        <div id="results-section" class="results-section">
+            <h2>Results</h2>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-label">Original</span>
+                    <span id="original-size" class="stat-value">-</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Compressed</span>
+                    <span id="compressed-size" class="stat-value">-</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Ratio</span>
+                    <span id="compression-ratio" class="stat-value">-</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Saved</span>
+                    <span id="space-savings" class="stat-value">-</span>
+                </div>
+            </div>
+
+            <div class="verification-box">
+                <strong>Verification:</strong> 
+                <span id="verify-result">-</span>
+            </div>
+
+            <div class="download-buttons">
+                <button id="download-compressed-btn" class="primary-btn">Download Compressed</button>
+                <button id="download-decompressed-btn" class="secondary-btn">Download Decompressed</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Libraries loaded globally for Person 1, 2 and 3 -->
+    <script src="lib/UPNG.js"></script>
+    <script src="lib/jpeg-js/index.js"></script>
+    <script src="lib/lamejs/lame.min.js"></script>
+    <script src="lib/ffmpeg.wasm/ffmpeg.min.js"></script>
+
+    <!-- Main Logic - Added as module to support ES6 imports -->
+    <script type="module" src="popup.js"></script>
+</body>
+</html>
