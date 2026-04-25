@@ -3,65 +3,88 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>File Compressor</title>
+    <title>File Compression Tool</title>
     <link rel="stylesheet" href="popup.css">
+
+    <!-- Libraries loaded as globals (UMD / IIFE) -->
+    <script src="lib/pako.js"></script>
+    <script src="lib/UPNG.js"></script>
 </head>
 <body>
     <div class="container">
-        <h1>File Compressor</h1>
-        
-        <div class="upload-section">
-            <input type="file" id="file-input" />
-            
-            <div class="action-buttons">
-                <button id="compress-btn" class="primary-btn">Compress File</button>
-                <button id="decompress-btn" class="secondary-btn">Decompress File</button>
+        <header class="app-header">
+            <div class="logo-row">
+                <svg class="logo-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <h1>File Compressor</h1>
             </div>
-            
-            <div id="error-msg" class="error-msg"></div>
+            <p class="subtitle">Compress &amp; verify files — lossless or lossy</p>
+        </header>
+
+        <!-- Upload -->
+        <section class="upload-section">
+            <label for="file-input" class="file-label" id="file-label">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span id="file-label-text">Choose a file…</span>
+            </label>
+            <input type="file" id="file-input"
+                   accept=".txt,.csv,.png,.jpg,.jpeg,.gif,.webp,.mp3,.wav,.mp4,.zip,.flac,.aac,.pdf" />
+            <p class="supported-types">
+                Supports: TXT, CSV, PNG, JPG, GIF, WebP, MP3, WAV, MP4, ZIP, FLAC, AAC, PDF
+            </p>
+        </section>
+
+        <!-- Actions -->
+        <div class="actions">
+            <button id="compress-btn" class="btn btn-primary">Compress File</button>
+            <button id="decompress-btn" class="btn btn-secondary">Decompress &amp; Verify</button>
         </div>
 
-        <div id="results-section" class="results-section">
+        <!-- Error -->
+        <p id="error-msg" class="error-msg" style="display:none;"></p>
+
+        <!-- Results -->
+        <section id="results-section" class="results-section" style="display:none;">
             <h2>Results</h2>
-            
             <div class="stats-grid">
                 <div class="stat-card">
                     <span class="stat-label">Original</span>
-                    <span id="original-size" class="stat-value">-</span>
+                    <span class="stat-value" id="original-size">-</span>
                 </div>
                 <div class="stat-card">
                     <span class="stat-label">Compressed</span>
-                    <span id="compressed-size" class="stat-value">-</span>
+                    <span class="stat-value" id="compressed-size">-</span>
                 </div>
                 <div class="stat-card">
                     <span class="stat-label">Ratio</span>
-                    <span id="compression-ratio" class="stat-value">-</span>
+                    <span class="stat-value" id="compression-ratio">-</span>
                 </div>
                 <div class="stat-card">
-                    <span class="stat-label">Saved</span>
-                    <span id="space-savings" class="stat-value">-</span>
+                    <span class="stat-label">Savings</span>
+                    <span class="stat-value" id="space-savings">-</span>
                 </div>
             </div>
 
-            <div class="verification-box">
-                <strong>Verification:</strong> 
-                <span id="verify-result">-</span>
+            <div class="verify-row">
+                <span class="verify-label">Verification:</span>
+                <span id="verify-result" class="verify-value">-</span>
             </div>
 
-            <div class="download-buttons">
-                <button id="download-compressed-btn" class="primary-btn">Download Compressed</button>
-                <button id="download-decompressed-btn" class="secondary-btn">Download Decompressed</button>
+            <div class="download-actions">
+                <button id="download-compressed-btn" class="btn btn-download">⬇ Compressed</button>
+                <button id="download-decompressed-btn" class="btn btn-download">⬇ Decompressed</button>
             </div>
-        </div>
+        </section>
     </div>
 
-    <!-- Libraries loaded globally for Person 1, 2 and 3 -->
-    <script src="lib/UPNG.js"></script>
-    <script src="lib/jpeg-js/index.js"></script>
-    <script src="lib/lamejs/lame.min.js"></script>
-    <script src="lib/ffmpeg.wasm/ffmpeg.min.js"></script>
-
-    <!-- Main Logic - Added as module to support ES6 imports -->
+    <!-- Main logic — loaded as ES module -->
     <script type="module" src="popup.js"></script>
 </body>
 </html>

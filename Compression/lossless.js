@@ -11,16 +11,14 @@ export async function compressLossless(file) {
     let compressedData;
     let outputFileName = file.name;
 
-    if (file.type === 'text/plain' || file.type === 'text/csv') {
-        // GZIP compression for text [cite: 53, 171]
+    if (file.type === 'image/png') {
+        // Lossless PNG re-encoding using UPNG
+        const img = UPNG.decode(arrayBuffer);
+        compressedData = UPNG.encode(UPNG.toRGBA8(img), img.width, img.height, 0);
+    } else {
+        // GZIP compression for everything else routed to lossless (text, csv, pdf, zip, gif)
         compressedData = fflate.gzipSync(uint8Array);
         outputFileName += '.gz';
-    } else if (file.type === 'image/png') {
-        // Lossless PNG re-encoding using UPNG [cite: 57, 172]
-        const img = UPNG.decode(arrayBuffer);
-        compressedData = UPNG.encode(UPNG.toRGBA8(img), img.width, img.height, 0); 
-    } else {
-        throw new Error("Unsupported file type for lossless compression.");
     }
     const originalSize = file.size;
     let compressedSize = compressedData.byteLength; // Check size before creating Blob
@@ -30,7 +28,7 @@ export async function compressLossless(file) {
         return {
             compressedBlob: new Blob([uint8Array], { type: file.type }),
             originalSize,
-            compressedSize: originalSize, 
+            compressedSize: originalSize,
             ratio: '1.00:1',
             spaceSavings: '0.0%',
             outputFileName: file.name,
@@ -59,11 +57,11 @@ export async function decompressLossless(file, originalType) {
     const uint8Array = new Uint8Array(arrayBuffer);
     let decompressedData;
 
-    if (originalType.includes('text')) {
-        decompressedData = fflate.gunzipSync(uint8Array);
-    } else {
+    if (originalType === 'image/png') {
         const img = UPNG.decode(arrayBuffer);
         decompressedData = UPNG.encode(UPNG.toRGBA8(img), img.width, img.height, 0);
+    } else {
+        decompressedData = fflate.gunzipSync(uint8Array);
     }
     return new Blob([decompressedData], { type: originalType });
 }

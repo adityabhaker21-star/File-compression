@@ -6,17 +6,7 @@
 // import lamejs from '../lib/lamejs/lame.min.js';
 // import { createFFmpeg, fetchFile } from '../lib/ffmpeg.wasm/ffmpeg.min.js';
 
-let ffmpegInstance = null;
 
-async function initFFmpeg() {
-    if (!ffmpegInstance) {
-        // Assuming FFmpeg global from ffmpeg.wasm script
-        const { createFFmpeg } = FFmpeg;
-        ffmpegInstance = createFFmpeg({ log: true });
-        await ffmpegInstance.load();
-    }
-    return ffmpegInstance;
-}
 
 /**
  * Compresses a JPEG, audio, or video file using lossy algorithms.
@@ -30,75 +20,217 @@ async function compressLossy(file, quality) {
     let compressedBlob;
     let outputFileName = file.name;
 
-    if (file.type === 'image/jpeg') {
+    if (file.type === 'image/jpeg' || file.type === 'image/webp') {
         const q = quality !== undefined ? quality : 0.7;
-        const arrayBuffer = await file.arrayBuffer();
         
-        // decode JPEG
-        const rawImageData = jpeg.decode(arrayBuffer, { useTArray: true }); // using global `jpeg` from jpeg-js
-        
-        // encode at lower quality (jpeg-js expects 0-100)
-        const quality100 = Math.floor(q * 100);
-        const encodedData = jpeg.encode(rawImageData, quality100);
-        
-        compressedBlob = new Blob([encodedData.data], { type: 'image/jpeg' });
-    } 
-    else if (file.type === 'audio/mpeg' || file.type === 'audio/wav') {
+        compressedBlob = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.src = URL.createObjectURL(file);
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                
+                canvas.toBlob((blob) => {
+                    URL.revokeObjectURL(img.src);
+                    resolve(blob);
+                }, file.type, q);
+            };
+            img.onerror = () => reject(new Error('Failed to load image for compression'));
+        });
+    }
+    else if (file.type === 'audio/mpeg' || file.type === 'audio/wav' || file.type === 'audio/flac' || file.type === 'audio/aac' || file.type === 'audio/x-m4a') {
         const q = quality !== undefined ? quality : 0.6;
         const arrayBuffer = await file.arrayBuffer();
-        
-        // Decode audio to get PCM data
+
+        // Decode audio natively
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        const originalBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        const channels = originalBuffer.numberOfChannels;
         
-        // lamejs expects 16-bit PCM samples
-        // We take the first channel for simplicity, or interleave if stereo
-        const channelData = audioBuffer.getChannelData(0); 
-        const sampleRate = audioBuffer.sampleRate;
-        const samples = new Int16Array(channelData.length);
-        for (let i = 0; i < channelData.length; i++) {
-            // Convert Float32 [-1.0, 1.0] to Int16
-            let s = Math.max(-1, Math.min(1, channelData[i]));
-            samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        const srMap = {
+            96000:0, 88200:1, 64000:2, 48000:3, 44100:4, 32000:5,
+            24000:6, 22050:7, 16000:8, 12000:9, 11025:10, 8000:11, 7350:12
+        };
+        let srIndex = srMap[originalBuffer.sampleRate];
+        let targetSampleRate = originalBuffer.sampleRate;
+        if (srIndex === undefined) {
+            srIndex = 4;
+            targetSampleRate = 44100;
         }
 
-        // Initialize lamejs MP3 encoder (channels, sampleRate, kbps)
-        // map quality 0.0-1.0 to kbps (e.g., 0.6 -> 128kbps)
-        const kbps = Math.floor(64 + q * 192); // 64 to 256 kbps
-        const mp3encoder = new lamejs.Mp3Encoder(1, sampleRate, kbps); // using global `lamejs`
-        
-        const mp3Data = [];
-        const sampleBlockSize = 1152;
-        for (let i = 0; i < samples.length; i += sampleBlockSize) {
-            const sampleChunk = samples.subarray(i, i + sampleBlockSize);
-            const mp3buf = mp3encoder.encodeBuffer(sampleChunk);
-            if (mp3buf.length > 0) {
-                mp3Data.push(new Int8Array(mp3buf));
+        const offlineCtx = new OfflineAudioContext(channels, Math.ceil(originalBuffer.duration * targetSampleRate), targetSampleRate);
+        const source = offlineCtx.createBufferSource();
+        source.buffer = originalBuffer;
+        source.connect(offlineCtx.destination);
+        source.start(0);
+        const audioBuffer = await offlineCtx.startRendering();
+
+        let rawKbps = Math.floor(64 + q * 192) * 1000;
+        const allowedBitrates = channels === 1 ? [48000, 64000, 96000, 128000] : [96000, 128000, 160000, 192000];
+        const kbps = allowedBitrates.reduce((prev, curr) => Math.abs(curr - rawKbps) < Math.abs(prev - rawKbps) ? curr : prev);
+        const chunks = [];
+
+        await new Promise((resolve, reject) => {
+            const encoder = new AudioEncoder({
+                output: (chunk) => {
+                    const data = new Uint8Array(chunk.byteLength);
+                    chunk.copyTo(data);
+                    
+                    const frameLength = data.length + 7;
+                    const header = new Uint8Array(7);
+                    header[0] = 0xFF;
+                    header[1] = 0xF1;
+                    header[2] = (1 << 6) | (srIndex << 2) | ((channels >> 2) & 0x01);
+                    header[3] = ((channels & 0x03) << 6) | ((frameLength >> 11) & 0x03);
+                    header[4] = (frameLength >> 3) & 0xFF;
+                    header[5] = ((frameLength & 0x07) << 5) | 0x1F;
+                    header[6] = 0xFC;
+                    
+                    chunks.push(header);
+                    chunks.push(data);
+                },
+                error: reject
+            });
+
+            encoder.configure({
+                codec: 'mp4a.40.2',
+                sampleRate: targetSampleRate,
+                numberOfChannels: channels,
+                bitrate: kbps
+            });
+
+            const totalFrames = audioBuffer.length;
+            const planarData = new Float32Array(totalFrames * channels);
+            for (let c = 0; c < channels; c++) {
+                planarData.set(audioBuffer.getChannelData(c), c * totalFrames);
             }
-        }
-        const mp3bufFinal = mp3encoder.flush();
-        if (mp3bufFinal.length > 0) {
-            mp3Data.push(new Int8Array(mp3bufFinal));
-        }
 
-        compressedBlob = new Blob(mp3Data, { type: 'audio/mpeg' });
-        outputFileName = outputFileName.replace(/\.wav$/i, '.mp3');
+            const framesPerChunk = targetSampleRate; 
+            let offset = 0;
+            let timestamp = 0;
+
+            while (offset < totalFrames) {
+                const frames = Math.min(framesPerChunk, totalFrames - offset);
+                const chunkData = new Float32Array(frames * channels);
+                
+                for (let c = 0; c < channels; c++) {
+                    chunkData.set(planarData.subarray(c * totalFrames + offset, c * totalFrames + offset + frames), c * frames);
+                }
+
+                const audioData = new AudioData({
+                    format: 'f32-planar',
+                    sampleRate: targetSampleRate,
+                    numberOfFrames: frames,
+                    numberOfChannels: channels,
+                    timestamp: timestamp,
+                    data: chunkData
+                });
+
+                encoder.encode(audioData);
+                audioData.close();
+                
+                offset += frames;
+                timestamp += (frames / targetSampleRate) * 1e6;
+            }
+
+            encoder.flush().then(() => {
+                encoder.close();
+                resolve();
+            }).catch(reject);
+        });
+
+        compressedBlob = new Blob(chunks, { type: 'audio/aac' });
+        outputFileName = outputFileName.replace(/\.(wav|mp3|flac|m4a)$/i, '.aac');
     }
-    else if (file.type === 'video/mp4') {
+    else if (file.type === 'video/mp4' || file.type === 'video/webm') {
         const q = quality !== undefined ? quality : 0.5;
-        const ffmpeg = await initFFmpeg();
-        const { fetchFile } = FFmpeg;
+        
+        // Native Browser Video Compression via Canvas & MediaRecorder
+        compressedBlob = await new Promise((resolve, reject) => {
+            const video = document.createElement('video');
+            video.src = URL.createObjectURL(file);
+            video.muted = false;
+            video.playsInline = true;
 
-        ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(file));
+            video.onloadedmetadata = () => {
+                // Scale down dimensions to save space (e.g. 0.5 quality = 75% scale = ~56% size)
+                const scale = 0.5 + (q * 0.5);
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.floor(video.videoWidth * scale);
+                canvas.height = Math.floor(video.videoHeight * scale);
+                const ctx = canvas.getContext('2d');
+
+                video.play().catch(reject);
+
+                video.onplay = () => {
+                    // 1. Get video stream from our resized Canvas
+                    const canvasStream = canvas.captureStream(30); // 30 FPS max
+                    const videoTrack = canvasStream.getVideoTracks()[0];
+                    
+                    // 2. Get original audio stream directly from the playing video
+                    let stream;
+                    try {
+                        const originalStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+                        const audioTracks = originalStream.getAudioTracks();
+                        stream = new MediaStream([videoTrack, ...audioTracks]);
+                    } catch (e) {
+                        // Fallback if audio capture fails
+                        stream = new MediaStream([videoTrack]);
+                    }
+
+                    // 3. Configure MediaRecorder with target bitrate
+                    const targetVideoBps = Math.floor(500000 + (q * 2000000)); // 500kbps to 2.5Mbps
+                    let mediaRecorder;
+                    
+                    // Chrome prefers WebM for MediaRecorder
+                    const mimeType = MediaRecorder.isTypeSupported('video/webm; codecs=vp9') 
+                        ? 'video/webm; codecs=vp9' 
+                        : 'video/webm';
+
+                    mediaRecorder = new MediaRecorder(stream, { 
+                        mimeType: mimeType,
+                        videoBitsPerSecond: targetVideoBps
+                    });
+
+                    const chunks = [];
+                    mediaRecorder.ondataavailable = e => {
+                        if (e.data && e.data.size > 0) chunks.push(e.data);
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        const blob = new Blob(chunks, { type: 'video/webm' });
+                        URL.revokeObjectURL(video.src);
+                        resolve(blob);
+                    };
+
+                    mediaRecorder.start();
+
+                    // 4. Render frames to Canvas
+                    const drawFrame = () => {
+                        if (video.paused || video.ended) {
+                            if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+                            return;
+                        }
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        requestAnimationFrame(drawFrame);
+                    };
+                    drawFrame();
+                };
+
+                video.onended = () => {
+                    if (video.captureStream) {
+                         video.captureStream().getTracks().forEach(t => t.stop());
+                    }
+                };
+            };
+            
+            video.onerror = () => reject(new Error("Failed to load video for compression"));
+        });
         
-        // Map quality to CRF (0 is best, 51 is worst)
-        // 0.5 quality -> CRF ~ 28
-        const crf = Math.floor(51 - (q * 51));
-        
-        await ffmpeg.run('-i', 'input.mp4', '-vcodec', 'libx264', '-crf', crf.toString(), 'output.mp4');
-        
-        const data = ffmpeg.FS('readFile', 'output.mp4');
-        compressedBlob = new Blob([data.buffer], { type: 'video/mp4' });
+        outputFileName = outputFileName.replace(/\.mp4$/i, '.webm');
     }
     else {
         throw new Error(`Unsupported file type for lossy compression: ${file.type}`);
@@ -137,7 +269,7 @@ async function decompressLossy(file, originalType) {
     // Often, the lossy file IS the playable format, so for images/audio/video we can simply return the file itself.
     // If exact decoding to raw data is needed for verifyLossy (PSNR), we still just return the file as a Blob, 
     // and verifyLossy will decode it using AudioContext / Image decoding.
-    
+
     // For JPEG, MP3, MP4, they are already standard formats. We just return it.
     // Wait, the interface says "For JPEG and video, this means re-decoding to a viewable/playable format."
     // Actually, compressed JPEG/MP4 are already viewable/playable formats.
